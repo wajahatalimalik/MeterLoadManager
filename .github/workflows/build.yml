@@ -32,10 +32,7 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon
-
-      - name: List APK files
-        run: find . -name "*.apk"
+        run: ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | grep -A 5 "error:"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
