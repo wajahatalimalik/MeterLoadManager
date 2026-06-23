@@ -32,19 +32,14 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
-        continue-on-error: true
+        run: ./gradlew assembleDebug --no-daemon
 
-      - name: Print Kotlin errors
-        run: |
-          find . -name "*.log" -path "*/build/*" -exec grep -l "error:" {} \; | head -5 | xargs grep "error:" 2>/dev/null | head -50
-          find . -name "output-metadata.json" 2>/dev/null
-          ls app/build/outputs/ 2>/dev/null || echo "no outputs folder"
+      - name: Find APK
+        run: find . -name "*.apk" -type f
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MeterLoadManager-debug
-          path: "**/*.apk"
-          if-no-files-found: warn
+          path: app/build/outputs/apk/debug/
           retention-days: 30
