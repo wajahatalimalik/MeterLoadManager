@@ -1,0 +1,4 @@
+-keep class com.iesco.meterloadmanager.data.entity.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class com.google.gson.** { *; }
