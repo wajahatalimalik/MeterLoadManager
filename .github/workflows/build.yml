@@ -34,12 +34,9 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: Find APK
-        run: find . -name "*.apk" -type f
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MeterLoadManager-debug
-          path: app/build/outputs/apk/debug/
+          path: "**/*.apk"
           retention-days: 30
