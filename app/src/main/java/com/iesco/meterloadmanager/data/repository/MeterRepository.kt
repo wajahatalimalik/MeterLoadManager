@@ -12,12 +12,17 @@ class MeterRepository(
     private val historyDao: MonthlyBillHistoryDao,
     private val readingDao: ManualReadingDao,
     private val switchDao: SwitchEventDao,
-    private val settingsDao: AppSettingsDao
+    private val settingsDao: AppSettingsDao,
+    val applianceDao: ApplianceDao,
+    val tariffDao: TariffDao
 ) {
-    val allMeters = meterDao.getAllMeters()
-    val allHistory = historyDao.getAll()
-    val allReadings = readingDao.getAll()
+    val allMeters       = meterDao.getAllMeters()
+    val allHistory      = historyDao.getAll()
+    val allReadings     = readingDao.getAll()
     val allSwitchEvents = switchDao.getAll()
+    val allAppliances   = applianceDao.getAll()
+    val activeAppliances = applianceDao.getActive()
+    val tariff          = tariffDao.get()
 
     suspend fun seedIfNeeded() {
         val s = settingsDao.get()
@@ -26,9 +31,15 @@ class MeterRepository(
             meterDao.insertAll(SeedData.meters())
             historyDao.insertAll(SeedData.history())
             readingDao.insertAll(SeedData.readings())
+            applianceDao.insertAll(SeedData.appliances())
+            tariffDao.insert(SeedData.tariff())
             settingsDao.setSeedInserted(true)
         }
     }
+
+    // ── Meters ────────────────────────────────────────────────────────────────
+    suspend fun addMeter(meter: Meter) = meterDao.insertAll(listOf(meter))
+    suspend fun updateMeter(meter: Meter) = meterDao.update(meter)
 
     suspend fun addReading(meterNo: String, reading: Double, ts: Long,
                            status: MeterStatus, notes: String?) {
@@ -67,7 +78,19 @@ class MeterRepository(
             triggeredBy=trigger, notes=notes, unitsAtSwitch=units))
     }
 
+    // ── History ───────────────────────────────────────────────────────────────
     suspend fun addHistory(h: MonthlyBillHistory) = historyDao.insert(h)
     suspend fun updateHistory(h: MonthlyBillHistory) = historyDao.update(h)
     suspend fun deleteHistory(h: MonthlyBillHistory) = historyDao.delete(h)
+
+    // ── Appliances ────────────────────────────────────────────────────────────
+    suspend fun addAppliance(a: Appliance) = applianceDao.insert(a)
+    suspend fun updateAppliance(a: Appliance) = applianceDao.update(a)
+    suspend fun deleteAppliance(a: Appliance) = applianceDao.delete(a)
+
+    // ── Tariff ────────────────────────────────────────────────────────────────
+    suspend fun updateTariff(t: TariffSettings) {
+        val existing = tariffDao.getOnce()
+        if (existing == null) tariffDao.insert(t) else tariffDao.update(t)
+    }
 }

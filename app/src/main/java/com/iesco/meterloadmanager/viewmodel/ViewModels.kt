@@ -8,19 +8,10 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.iesco.meterloadmanager.MeterApp
-import com.iesco.meterloadmanager.data.entity.ManualReading
-import com.iesco.meterloadmanager.data.entity.MeterStatus
-import com.iesco.meterloadmanager.data.entity.MonthlyBillHistory
-import com.iesco.meterloadmanager.data.entity.SwitchEvent
+import com.iesco.meterloadmanager.data.entity.*
 import com.iesco.meterloadmanager.utils.BillingCalculator
 import com.iesco.meterloadmanager.utils.ExportManager
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -28,87 +19,81 @@ import java.time.format.DateTimeFormatter
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 
 data class MeterCard(
-    val meter: com.iesco.meterloadmanager.data.entity.Meter,
+    val meter: Meter,
     val consumed: Double,
-    val to150: Double,
-    val to180: Double,
-    val to190: Double,
-    val to199: Double,
-    val dailyAvg: Double,
-    val projected: Double,
-    val risk: BillingCalculator.Risk,
-    val progress: Float
+    val to150: Double, val to175: Double, val to199: Double,
+    val dailyAvg: Double, val projected: Double,
+    val risk: BillingCalculator.Risk, val progress: Float,
+    val estBill: Double,
+    val date175: LocalDate?, val date200: LocalDate?
 )
 
 data class DashState(
-    val cycleStart: String = "",
-    val cycleEnd: String = "",
-    val daysPassed: Int = 0,
-    val daysRemaining: Int = 0,
+    val cycleStart: String = "", val cycleEnd: String = "",
+    val daysPassed: Int = 0, val daysRemaining: Int = 0,
     val cards: List<MeterCard> = emptyList(),
-    val totalConsumed: Double = 0.0,
-    val totalDailyAvg: Double = 0.0,
+    val totalConsumed: Double = 0.0, val totalDailyAvg: Double = 0.0,
+    val totalEstBill: Double = 0.0,
     val recs: List<BillingCalculator.Recommendation> = emptyList()
 )
 
 class DashboardVM(app: Application) : AndroidViewModel(app) {
     private val repo = (app as MeterApp).repo
 
-    val state: StateFlow<DashState> = repo.allMeters.map { meters ->
-        val today = LocalDate.now()
-        val cs = BillingCalculator.cycleStart(today)
-        val ce = BillingCalculator.cycleEnd(today)
-        val fmt = DateTimeFormatter.ofPattern("dd MMM yyyy")
-        val cards = meters.map { m ->
-            MeterCard(
-                meter = m,
-                consumed = BillingCalculator.consumed(m),
-                to150 = BillingCalculator.remainingTo(m, 150.0),
-                to180 = BillingCalculator.remainingTo(m, 180.0),
-                to190 = BillingCalculator.remainingTo(m, 190.0),
-                to199 = BillingCalculator.remainingTo(m, 199.0),
-                dailyAvg = BillingCalculator.dailyAvg(m),
-                projected = BillingCalculator.projected(m),
-                risk = BillingCalculator.risk(m),
-                progress = BillingCalculator.progress(m)
+    val state: StateFlow<DashState> =
+        combine(repo.allMeters, repo.tariff) { meters, tariff ->
+            val t = tariff ?: TariffSettings()
+            val today = LocalDate.now()
+            val cs = BillingCalculator.cycleStart(today)
+            val fmt = DateTimeFormatter.ofPattern("dd MMM yyyy")
+            val cards = meters.map { m ->
+                val consumed = BillingCalculator.consumed(m)
+                val proj = BillingCalculator.projected(m)
+                val isProtected = m.meterNumber != "700"
+                MeterCard(
+                    meter = m, consumed = consumed,
+                    to150 = BillingCalculator.remainingTo(m, 150.0),
+                    to175 = BillingCalculator.remainingTo(m, 175.0),
+                    to199 = BillingCalculator.remainingTo(m, 199.0),
+                    dailyAvg = BillingCalculator.dailyAvg(m),
+                    projected = proj,
+                    risk = BillingCalculator.risk(m),
+                    progress = BillingCalculator.progress(m),
+                    estBill = BillingCalculator.estimateBill(proj, isProtected, t),
+                    date175 = BillingCalculator.estimatedDateToReach(m, 175.0),
+                    date200 = BillingCalculator.estimatedDateToReach(m, 200.0)
+                )
+            }
+            DashState(
+                cycleStart = cs.format(fmt),
+                cycleEnd = BillingCalculator.cycleEnd(today).format(fmt),
+                daysPassed = BillingCalculator.daysPassed(cs).toInt(),
+                daysRemaining = BillingCalculator.daysRemaining(cs).toInt(),
+                cards = cards,
+                totalConsumed = cards.sumOf { it.consumed },
+                totalDailyAvg = cards.sumOf { it.dailyAvg },
+                totalEstBill = cards.sumOf { it.estBill },
+                recs = BillingCalculator.recommendations(meters)
             )
-        }
-        DashState(
-            cycleStart = cs.format(fmt),
-            cycleEnd = ce.format(fmt),
-            daysPassed = BillingCalculator.daysPassed(cs).toInt(),
-            daysRemaining = BillingCalculator.daysRemaining(cs).toInt(),
-            cards = cards,
-            totalConsumed = cards.sumOf { it.consumed },
-            totalDailyAvg = cards.sumOf { it.dailyAvg },
-            recs = BillingCalculator.recommendations(meters)
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashState())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashState())
 
-    init {
-        viewModelScope.launch { repo.seedIfNeeded() }
-    }
+    init { viewModelScope.launch { repo.seedIfNeeded() } }
 }
 
 // ── Reading ────────────────────────────────────────────────────────────────────
 
 class ReadingVM(app: Application) : AndroidViewModel(app) {
     private val repo = (app as MeterApp).repo
-
     val allReadings = repo.allReadings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun save(meterNo: String, reading: Double, ts: Long, status: MeterStatus, notes: String?) {
         viewModelScope.launch { repo.addReading(meterNo, reading, ts, status, notes) }
     }
-
     fun delete(id: Long, meterNo: String) {
         viewModelScope.launch { repo.deleteReading(id, meterNo) }
     }
-
-    fun update(r: ManualReading) {
-        viewModelScope.launch { repo.updateReading(r) }
-    }
+    fun update(r: ManualReading) { viewModelScope.launch { repo.updateReading(r) } }
 }
 
 // ── History ────────────────────────────────────────────────────────────────────
@@ -120,13 +105,9 @@ class HistoryVM(app: Application) : AndroidViewModel(app) {
 
     val history: StateFlow<List<MonthlyBillHistory>> =
         combine(repo.allHistory, selectedMeter, query) { hist, meter, q ->
-            hist
-                .filter { meter == null || it.meterNumber == meter }
-                .filter {
-                    q.isBlank() ||
-                    it.billingMonth.contains(q, ignoreCase = true) ||
-                    it.notes?.contains(q, ignoreCase = true) == true
-                }
+            hist.filter { meter == null || it.meterNumber == meter }
+                .filter { q.isBlank() || it.billingMonth.contains(q, true) ||
+                    it.notes?.contains(q, true) == true }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun add(h: MonthlyBillHistory) { viewModelScope.launch { repo.addHistory(h) } }
@@ -134,16 +115,49 @@ class HistoryVM(app: Application) : AndroidViewModel(app) {
     fun delete(h: MonthlyBillHistory) { viewModelScope.launch { repo.deleteHistory(h) } }
 }
 
+// ── Appliances ─────────────────────────────────────────────────────────────────
+
+data class ApplianceState(
+    val appliances: List<Appliance> = emptyList(),
+    val filterMeter: String? = null,
+    val filterCategory: ApplianceCategory? = null,
+    val totalDailyUnits: Double = 0.0,
+    val byMeter: Map<String, Double> = emptyMap()
+)
+
+class ApplianceVM(app: Application) : AndroidViewModel(app) {
+    private val repo = (app as MeterApp).repo
+    val filterMeter = MutableStateFlow<String?>(null)
+    val filterCategory = MutableStateFlow<ApplianceCategory?>(null)
+
+    val state: StateFlow<ApplianceState> =
+        combine(repo.allAppliances, filterMeter, filterCategory) { all, meter, cat ->
+            val filtered = all
+                .filter { meter == null || it.assignedMeter == meter }
+                .filter { cat == null || it.category == cat }
+            val active = all.filter { it.isActive }
+            ApplianceState(
+                appliances = filtered,
+                filterMeter = meter,
+                filterCategory = cat,
+                totalDailyUnits = active.sumOf { it.dailyUnits },
+                byMeter = active.groupBy { it.assignedMeter }
+                    .mapValues { (_, list) -> list.sumOf { it.dailyUnits } }
+            )
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ApplianceState())
+
+    fun add(a: Appliance) { viewModelScope.launch { repo.addAppliance(a) } }
+    fun update(a: Appliance) { viewModelScope.launch { repo.updateAppliance(a) } }
+    fun delete(a: Appliance) { viewModelScope.launch { repo.deleteAppliance(a) } }
+    fun toggle(a: Appliance) { viewModelScope.launch { repo.updateAppliance(a.copy(isActive = !a.isActive)) } }
+}
+
 // ── Switch ─────────────────────────────────────────────────────────────────────
 
 class SwitchVM(app: Application) : AndroidViewModel(app) {
     private val repo = (app as MeterApp).repo
-
-    val meters = repo.allMeters
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val events = repo.allSwitchEvents
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val meters = repo.allMeters.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val events = repo.allSwitchEvents.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun changeStatus(meterNo: String, newStatus: MeterStatus, prevStatus: MeterStatus, notes: String?) {
         viewModelScope.launch { repo.changeMeterStatus(meterNo, newStatus, prevStatus, notes) }
@@ -156,25 +170,26 @@ data class AnalyticsState(
     val byMeter: Map<String, List<MonthlyBillHistory>> = emptyMap(),
     val overLimit: List<MonthlyBillHistory> = emptyList(),
     val currentUnits: Map<String, Double> = emptyMap(),
+    val projectedUnits: Map<String, Double> = emptyMap(),
     val avgUnits: Map<String, Double> = emptyMap(),
     val avgBill: Map<String, Double> = emptyMap(),
-    val costPerUnit: Map<String, Double> = emptyMap()
+    val costPerUnit: Map<String, Double> = emptyMap(),
+    val applianceByMeter: Map<String, Double> = emptyMap(),
+    val topAppliances: List<Appliance> = emptyList(),
+    val estBillByMeter: Map<String, Double> = emptyMap()
 )
 
 class AnalyticsVM(app: Application) : AndroidViewModel(app) {
     private val repo = (app as MeterApp).repo
 
     val state: StateFlow<AnalyticsState> =
-        combine(repo.allHistory, repo.allMeters) { hist, meters ->
+        combine(repo.allHistory, repo.allMeters, repo.activeAppliances, repo.tariff) { hist, meters, apps, tariff ->
+            val t = tariff ?: TariffSettings()
             val byMeter = mapOf(
-                "600" to hist.filter { it.meterNumber == "600" }
-                    .sortedWith(compareBy({ it.billingYear }, { it.billingMonthInt })),
-                "603" to hist.filter { it.meterNumber == "603" }
-                    .sortedWith(compareBy({ it.billingYear }, { it.billingMonthInt })),
-                "700" to hist.filter { it.meterNumber == "700" }
-                    .sortedWith(compareBy({ it.billingYear }, { it.billingMonthInt }))
+                "600" to hist.filter { it.meterNumber == "600" }.sortedWith(compareBy({ it.billingYear },{ it.billingMonthInt })),
+                "603" to hist.filter { it.meterNumber == "603" }.sortedWith(compareBy({ it.billingYear },{ it.billingMonthInt })),
+                "700" to hist.filter { it.meterNumber == "700" }.sortedWith(compareBy({ it.billingYear },{ it.billingMonthInt }))
             )
-
             fun avgU(m: String) = byMeter[m]?.map { it.unitsConsumed.toDouble() }?.average() ?: 0.0
             fun avgB(m: String) = byMeter[m]?.map { it.billAmount }?.average() ?: 0.0
             fun cpu(m: String): Double {
@@ -183,14 +198,23 @@ class AnalyticsVM(app: Application) : AndroidViewModel(app) {
                 val b = h.sumOf { it.billAmount }
                 return if (u > 0) b / u else 0.0
             }
-
+            val currentUnits = meters.associate { it.meterNumber to BillingCalculator.consumed(it) }
+            val projectedUnits = meters.associate { it.meterNumber to BillingCalculator.projected(it) }
+            val estBill = meters.associate { m ->
+                m.meterNumber to BillingCalculator.estimateBill(
+                    BillingCalculator.projected(m), m.meterNumber != "700", t)
+            }
             AnalyticsState(
                 byMeter = byMeter,
                 overLimit = hist.filter { it.isOverLimit },
-                currentUnits = meters.associate { it.meterNumber to BillingCalculator.consumed(it) },
+                currentUnits = currentUnits,
+                projectedUnits = projectedUnits,
                 avgUnits = mapOf("600" to avgU("600"), "603" to avgU("603"), "700" to avgU("700")),
-                avgBill = mapOf("600" to avgB("600"), "603" to avgB("603"), "700" to avgB("700")),
-                costPerUnit = mapOf("600" to cpu("600"), "603" to cpu("603"), "700" to cpu("700"))
+                avgBill  = mapOf("600" to avgB("600"), "603" to avgB("603"), "700" to avgB("700")),
+                costPerUnit = mapOf("600" to cpu("600"), "603" to cpu("603"), "700" to cpu("700")),
+                applianceByMeter = apps.groupBy { it.assignedMeter }.mapValues { (_, l) -> l.sumOf { it.dailyUnits } },
+                topAppliances = apps.sortedByDescending { it.dailyUnits }.take(5),
+                estBillByMeter = estBill
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AnalyticsState())
 }
@@ -203,59 +227,36 @@ class ExportVM(app: Application) : AndroidViewModel(app) {
 
     private val _intent = MutableLiveData<Intent?>()
     val shareIntent: LiveData<Intent?> = _intent
-
     private val _status = MutableLiveData("")
     val status: LiveData<String> = _status
 
-    fun exportCsv() {
+    private fun doExport(block: suspend () -> Pair<java.io.File, String>) {
         viewModelScope.launch {
             try {
-                val m = repo.allMeters.first()
-                val h = repo.allHistory.first()
-                val r = repo.allReadings.first()
-                val s = repo.allSwitchEvents.first()
-                val file = ExportManager.csv(ctx, m, h, r, s)
-                _intent.value = ExportManager.share(ctx, file, "text/csv")
+                val (file, mime) = block()
+                _intent.value = ExportManager.share(ctx, file, mime)
                 _status.value = "Exported: ${file.name}"
-            } catch (e: Exception) {
-                _status.value = "Error: ${e.message}"
-            }
+            } catch (e: Exception) { _status.value = "Error: ${e.message}" }
         }
     }
 
-    fun exportJson() {
-        viewModelScope.launch {
-            try {
-                val m = repo.allMeters.first()
-                val h = repo.allHistory.first()
-                val r = repo.allReadings.first()
-                val s = repo.allSwitchEvents.first()
-                val file = ExportManager.json(ctx, m, h, r, s)
-                _intent.value = ExportManager.share(ctx, file, "application/json")
-                _status.value = "Exported: ${file.name}"
-            } catch (e: Exception) {
-                _status.value = "Error: ${e.message}"
-            }
-        }
+    fun exportCsv() = doExport {
+        val m = repo.allMeters.first(); val h = repo.allHistory.first()
+        val r = repo.allReadings.first(); val s = repo.allSwitchEvents.first()
+        val a = repo.allAppliances.first()
+        ExportManager.csv(ctx, m, h, r, s, a) to "text/csv"
     }
-
-    fun exportReport() {
-        viewModelScope.launch {
-            try {
-                val m = repo.allMeters.first()
-                val h = repo.allHistory.first()
-                val r = repo.allReadings.first()
-                val s = repo.allSwitchEvents.first()
-                val file = ExportManager.report(ctx, m, h, r, s)
-                _intent.value = ExportManager.share(ctx, file, "text/plain")
-                _status.value = "Exported: ${file.name}"
-            } catch (e: Exception) {
-                _status.value = "Error: ${e.message}"
-            }
-        }
+    fun exportJson() = doExport {
+        val m = repo.allMeters.first(); val h = repo.allHistory.first()
+        val r = repo.allReadings.first(); val s = repo.allSwitchEvents.first()
+        val a = repo.allAppliances.first()
+        ExportManager.json(ctx, m, h, r, s, a) to "application/json"
     }
-
-    fun clearIntent() {
-        _intent.value = null
+    fun exportReport() = doExport {
+        val m = repo.allMeters.first(); val h = repo.allHistory.first()
+        val r = repo.allReadings.first(); val s = repo.allSwitchEvents.first()
+        val a = repo.allAppliances.first()
+        ExportManager.report(ctx, m, h, r, s, a) to "text/plain"
     }
+    fun clearIntent() { _intent.value = null }
 }

@@ -9,8 +9,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
 import com.iesco.meterloadmanager.navigation.NAV_ITEMS
 import com.iesco.meterloadmanager.navigation.Screen
@@ -28,12 +28,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun App() {
     val nav = rememberNavController()
-    val dashVM: DashboardVM = viewModel()
-    val readVM: ReadingVM   = viewModel()
-    val histVM: HistoryVM   = viewModel()
-    val swVM:  SwitchVM     = viewModel()
-    val anaVM: AnalyticsVM  = viewModel()
-    val expVM: ExportVM     = viewModel()
+    val dashVM: DashboardVM  = viewModel()
+    val readVM: ReadingVM    = viewModel()
+    val histVM: HistoryVM    = viewModel()
+    val appVM:  ApplianceVM  = viewModel()
+    val anaVM:  AnalyticsVM  = viewModel()
+    val swVM:   SwitchVM     = viewModel()
+    val expVM:  ExportVM     = viewModel()
 
     Scaffold(
         bottomBar = {
@@ -43,7 +44,7 @@ fun App() {
                 NAV_ITEMS.forEach { screen ->
                     NavigationBarItem(
                         icon = { Icon(screen.icon, screen.label) },
-                        label = { Text(screen.label) },
+                        label = { Text(screen.label, maxLines = 1, fontSize = androidx.compose.ui.unit.TextUnit(9f, androidx.compose.ui.unit.TextUnitType.Sp)) },
                         selected = current?.hierarchy?.any { it.route == screen.route } == true,
                         onClick = {
                             nav.navigate(screen.route) {
@@ -56,15 +57,14 @@ fun App() {
             }
         }
     ) { pad ->
-        NavHost(nav, startDestination = Screen.Dashboard.route, modifier = Modifier.padding(pad)) {
-            composable(Screen.Dashboard.route) {
-                DashboardScreen(dashVM) { nav.navigate(Screen.Reading.route) }
-            }
-            composable(Screen.Reading.route)   { AddReadingScreen(readVM) }
-            composable(Screen.History.route)   { HistoryScreen(histVM) }
-            composable(Screen.Analytics.route) { AnalyticsScreen(anaVM) }
-            composable(Screen.Switches.route)  { SwitchScreen(swVM) }
-            composable(Screen.Export.route)    { ExportScreen(expVM) }
+        NavHost(nav, startDestination = Screen.Dashboard.route, Modifier.padding(pad)) {
+            composable(Screen.Dashboard.route)  { DashboardScreen(dashVM) { nav.navigate(Screen.Reading.route) } }
+            composable(Screen.Reading.route)    { AddReadingScreen(readVM) }
+            composable(Screen.History.route)    { HistoryScreen(histVM) }
+            composable(Screen.Appliances.route) { AppliancesScreen(appVM) }
+            composable(Screen.Analytics.route)  { AnalyticsScreen(anaVM) }
+            composable(Screen.Switches.route)   { SwitchScreen(swVM) }
+            composable(Screen.Export.route)     { ExportScreen(expVM) }
         }
     }
 }

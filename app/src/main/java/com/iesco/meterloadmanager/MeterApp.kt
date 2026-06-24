@@ -7,6 +7,14 @@ import com.iesco.meterloadmanager.data.repository.MeterRepository
 class MeterApp : Application() {
     val db by lazy { MeterDatabase.get(this) }
     val repo by lazy {
-        MeterRepository(db.meterDao(), db.historyDao(), db.readingDao(), db.switchDao(), db.settingsDao())
+        MeterRepository(
+            meterDao      = db.meterDao(),
+            historyDao    = db.historyDao(),
+            readingDao    = db.readingDao(),
+            switchDao     = db.switchDao(),
+            settingsDao   = db.settingsDao(),
+            applianceDao  = db.applianceDao(),
+            tariffDao     = db.tariffDao()
+        )
     }
 }
